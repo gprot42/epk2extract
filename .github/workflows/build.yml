@@ -1,34 +1,46 @@
-name: SonarQube
+name: Unified Cirrus CLI Pipeline
 on:
+  workflow_dispatch:
   push:
-    branches:
-      - master
-      - develop
+    branches: [ ci ]
   pull_request:
-    types: [opened, synchronize, reopened]
-jobs:
-  build:
-    name: Build and analyze
-    runs-on: ubuntu-latest
-    env:
-      BUILD_WRAPPER_OUT_DIR: build_wrapper_output_directory # Directory where build-wrapper output will be placed
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
-      - name: Install Dependencies
-        run: |
-          sudo apt-get install -y git build-essential cmake liblzo2-dev libssl-dev libc6-dev
-      - name: Install Build Wrapper
-        uses: SonarSource/sonarqube-scan-action/install-build-wrapper@v5
-      - name: Run Build Wrapper
-        run: |
-          build-wrapper-linux-x86-64 --out-dir ${{ env.BUILD_WRAPPER_OUT_DIR }} ./build.sh
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v5
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        with:
-          args: >
-            --define sonar.cfamily.compile-commands="${{ env.BUILD_WRAPPER_OUT_DIR }}/compile_commands.json"
 
+jobs:
+  cirrus-matrix:
+    name: ${{ matrix.task_name }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            task_name: "linux_x64"
+
+          - os: macos-26
+            task_name: "darwin_aarch64"
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up HTTP Cache (Linux only)
+        if: runner.os == 'Linux'
+        uses: cirruslabs/http-cache-action@master
+
+      - name: Run Linux Task
+        if: runner.os == 'Linux'
+        uses: cirruslabs/cirrus-action@master
+        with:
+          task: ${{ matrix.task_name }}
+        env:
+          CIRRUS_HTTP_CACHE_HOST: "localhost:12321"
+
+      - name: Install Cirrus & Tart (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cirruslabs/cli/cirrus
+          brew install cirruslabs/cli/tart
+
+      - name: Run macOS Task
+        if: runner.os == 'macOS'
+        run: |
+          cirrus run ${{ matrix.task_name }}
